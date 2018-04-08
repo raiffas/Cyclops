@@ -1,137 +1,141 @@
 #include <Adafruit_NeoPixel.h>
+#include "functions.h"
+#include <dht11.h>
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C lcd(0x20,16,2);
+dht11 DHT;
+#define DHT11_PIN 4;
 
 #define PIN 6
-uint16_t numPix = 30;
+#define BUTTONPIN 9
+#define RBUTTONPIN 10
+#define LBUTTONPIN 8
+
+//CHANGE THESE
+uint16_t numPix = 15;
+unsigned long Interval = 200; // HOW FAST THE LIGHTS CHANGE
+
+////////////////////////////////////
+//      NEEDED FOR SCANNER        //
+////////////////////////////////////
+unsigned long lastUpdate;
+bool dir;
+uint32_t Color1;
+uint16_t Index;
+////////////////////////////////////
+////////////////////////////////////
+//        NEEDED FOR GAME         //
+////////////////////////////////////
+int buttonState = HIGH;
+int rButton = HIGH;
+int lButton = HIGH;
+int gameState = HIGH;
+long score = 0;
+int numMissed = 0;
+uint16_t target;
+uint8_t wait = 200;
+//////////////////////////////////// 
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(numPix, PIN, NEO_RGBW + NEO_KHZ800);
+
 const uint32_t magenta = strip.Color(0, 200, 255);
 const uint32_t green = strip.Color(255, 0, 0);
 const uint32_t red = strip.Color(0, 255, 0);
 const uint32_t blue = strip.Color(0, 0, 255);
+const uint32_t white = strip.Color(0, 0, 0, 255);
 
-////////////////////////////////////////////////////////////////////////////////////
-void Update(void);
-void Increment();
-void Reverse();
-
-void Scanner(uint32_t color1, uint8_t interval);
-void ScannerUpdate();
-
-uint32_t DimColor(uint32_t color);
-uint8_t Red(uint32_t color);
-uint8_t Green(uint32_t color);
-uint8_t Blue(uint32_t color);
-
-void oneON(uint16_t pix, uint32_t c);
-void oneOFF(uint16_t pix);
-
-unsigned long Interval;
-unsigned long lastUpdate;
-
-uint16_t dir;
-uint32_t Color1;
-uint16_t TotalSteps;
-uint16_t Index;
-////////////////////////////////////////////////////////////
-
-void setup() {
-  // This is for Trinket 5V 16MHz, you can remove these three lines if you are not using a Trinket
-  #if defined (__AVR_ATtiny85__)
-    if (F_CPU == 16000000) clock_prescale_set(clock_div_1);
-  #endif
-  // End of trinket special code
-  
-  Serial.begin(9600);
-
+void setup() {  
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
-  Scanner(magenta,100);
-}
+  Scanner(blue,Interval);
 
-uint16_t pix=0;
+  pinMode(BUTTONPIN, INPUT);
+  digitalWrite(BUTTONPIN, HIGH);//Sets unpushed to HIGH to 1
+  
+  pinMode(RBUTTONPIN, INPUT);
+  digitalWrite(RBUTTONPIN, HIGH);
+  
+  pinMode(LBUTTONPIN, INPUT);
+  digitalWrite(LBUTTONPIN, HIGH);
+
+  lcd.begin();
+  lcd.backlight();
+
+  printOnLCD("Ready?");
+  //waitingToPlay(); NOT READY TO BE USED
+}
 
 void loop() {
-  Update();
-}
-
-void Update(){
-  if((millis() - lastUpdate) > Interval) { // time to update
-    lastUpdate = millis();
-    ScannerUpdate();
+  if(gameState == HIGH){
+    gameState = digitalRead(BUTTONPIN);
+    //waitingToPlay(wait); // NOT READY TO BE USED
   }
-}
-
-// Increment the Index and reset at the end
-void Increment(){
-  if (dir == 1) {
-    Index++;
-    if (Index >= numPix){
-      Reverse();
+  if(gameState == LOW){
+    delay(500); // to avoid one button press being counted as multiple
+    printOnLCD("GO!");
+    
+    target = random(numPix);
+    oneON(target, white);
+    buttonState = HIGH;
+    
+    while(buttonState == HIGH){
+      Update();
+      buttonState = digitalRead(BUTTONPIN);
     }
-  }
-  else{ // dir == -1 (REVERSE)
-    --Index;
-    if (Index <= 0) {
-      Reverse();
+    if(Index == target){
+       oneON(Index,red);
+       score = score + 100;
+       printOnLCD("Nice hit!");
+       delay(2000);
+       oneOFF(Index);
     }
-  }
-}
+    else{
+      numMissed = numMissed + 1;
+      printOnLCD("You missed.");
+      delay(700);
+      if(numMissed == 3){
+        gameState = HIGH;
+        printOnLCD("You missed 3.");
+        delay(1000);
 
-// Reverse pattern strip_direction
-void Reverse() {
-  if (dir == 1) {
-    dir = -1;
-    Index = numPix-1;
-  }
-  else{
-    dir = 1;
-    Index = 0;
-    //delay(3000);
-  }
-}
-
-// Initialize for a SCANNNER
-void Scanner(uint32_t color1, uint8_t interval) {
-  Interval = interval;
-  TotalSteps = (numPix - 1) * 2; // twice num of pixels - 2
-  Color1 = color1;
-  Index = 0;
-  dir = 1;
-}
-
-// Update the Scanner Pattern
-void ScannerUpdate(){ 
-  for (int i = 0; i < numPix; i++){
-    if (i == Index) { // first half of the scan
-      oneON(i, Color1);
+        lcd.clear();
+        lcd.print("    GAME OVER   ");
+        delay(2000);
+        lcd.print("  Score: ");
+        lcd.print((String)score);
+        delay(3000);
+        
+        printOnLCD("Again? L=NO R=YES");
+        while((rButton == HIGH) && (lButton == HIGH)){
+          rButton = digitalRead(RBUTTONPIN);
+          lButton = digitalRead(LBUTTONPIN);
+        }
+        if (rButton == LOW){ printOnLCD("Ready?"); }
+        else{ //waitingToPlay() }
+        
+      }
     }
-    else { // fade to black
-      strip.setPixelColor(i, DimColor(strip.getPixelColor(i)));
-    }
+    delay(1000);
   }
-  strip.show();
-  Increment();
+ }
 }
 
-// Return color, dimmed by 75% (used by scanner)
-uint32_t DimColor(uint32_t color) {
-  uint32_t dimColor = strip.Color(Red(color) >> 1, Green(color) >> 1, Blue(color) >> 1);
-  return dimColor;
-}
-// Returns the Red component of a 32-bit color
-  uint8_t Red(uint32_t color) { return (color >> 16) & 0xFF; }
-// Returns the Green component of a 32-bit color
-  uint8_t Green(uint32_t color) { return (color >> 8) & 0xFF; }
-// Returns the Blue component of a 32-bit color
-  uint8_t Blue(uint32_t color) { return color & 0xFF; }
+//void waitingToPlay(uint8_t wait){
+//  printOnLCD("Press to Play.");
+//  strip.RainbowCycle();
+//  while(gameState == HIGH){
+//    for(j=0; j<256*5; j++) { // 5 cycles of all colors on wheel
+//      for(i=0; i< strip.numPixels(); i++) {
+//        strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + j) & 255));
+//      }
+//    strip.show();
+//    delay(wait);
+//  }
+//    
+//  }
+//}
 
-void oneON(uint16_t pix, uint32_t c) {
-  strip.begin();
-  strip.setPixelColor(pix,c);
-  strip.show();
-}
-
-void oneOFF(uint16_t pix){
-  strip.setPixelColor(pix, strip.Color(0,0,0));
-  strip.show();
+void printOnLCD(String message){
+  lcd.clear();
+  lcd.print(message);
 }
